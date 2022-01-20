@@ -1,1 +1,162 @@
+#include "stm8s.h"
+#include "milis.h"
+#include "swspi.h"
 
+void max7219_init(void);//inicializace displaye
+void pricitani(void);//po stisku tlačítka se přičte 30 sekund
+void odcitani(void);//po stisku tlačítka se odečte 30 sekund
+void zobraz(void);//zpracovává minuty a sekundy a zobrazuje je na displeji
+void startstop(void);//Tlačítko pro zastavení a pokračování odpočtu sekund
+void init_tim(void);//inicializace timeru
+void tik(void);//Tikání
+
+uint8_t y=0,a=0,b=0,c=0,d=0, x=0,z=0; 
+uint16_t sec=0,min=0,last_time=0;
+uint16_t hodnota=0;
+uint8_t tlacitko=0,stop=0,tiky=0;
+
+void main(void){
+CLK_HSIPrescalerConfig(CLK_PRESCALER_HSIDIV1); // 16MHz z interního RC oscilátoru
+//inicializace fci
+init_milis(); 
+swspi_init();
+max7219_init();
+init_tim();
+//inicializace vstupů
+GPIO_Init(GPIOE, GPIO_PIN_4,GPIO_MODE_IN_FL_NO_IT);//start stop
+GPIO_Init(GPIOG, GPIO_PIN_5,GPIO_MODE_IN_PU_NO_IT);//přičítaní
+GPIO_Init(GPIOG, GPIO_PIN_4,GPIO_MODE_IN_PU_NO_IT);//odečítání
+//počáteční zobrazení na display nastavíme na nulu
+swspi_tx16(0x01<<8 | 0b0000000);
+swspi_tx16(0x02<<8 | 0b0000000);
+swspi_tx16(0x03<<8 | 0b0000000);
+swspi_tx16(0x04<<8 | 0b0000000);
+	
+	while (1){
+		startstop();
+		if(milis() - last_time>= 1000 && y==1 && hodnota>=1){
+			last_time=milis();
+			hodnota--;
+			zobraz();
+			tiky=0;
+			if(a==0 && b==0 && c==0 && d==0){
+				y=0;
+				tiky=1;
+			}
+		}
+		if(tiky==1){tik();}
+		if(tiky==0){TIM2_Cmd(DISABLE);}
+		pricitani();
+		odcitani();
+	}	
+}
+
+void startstop(void){
+	if(GPIO_ReadInputPin(GPIOE,GPIO_PIN_4)== RESET && tlacitko==0){
+			last_time=milis();
+			y=1;
+			tlacitko=1;
+			stop++;
+		}
+	if(GPIO_ReadInputPin(GPIOE,GPIO_PIN_4)!= RESET){tlacitko=0;}
+	if(stop==2){
+		stop=0;
+		y=0;
+	}
+}
+
+void pricitani(void){
+if(GPIO_ReadInputPin(GPIOG,GPIO_PIN_5)== RESET && x==0){
+			x=1;
+			hodnota=hodnota+30;
+			zobraz();
+}
+if(GPIO_ReadInputPin(GPIOG,GPIO_PIN_5)!= RESET){x=0;}
+}
+
+
+void odcitani(void){
+if(GPIO_ReadInputPin(GPIOG,GPIO_PIN_4)== RESET && z==0 && min>=30){
+			z=1;
+			hodnota=hodnota-30;
+			zobraz();
+}
+if(GPIO_ReadInputPin(GPIOG,GPIO_PIN_4)!= RESET){z=0;}
+}
+
+
+void zobraz(void){
+a=hodnota/600;
+min=hodnota%600;
+b=min/60;
+sec=min%60;
+c=sec/10;
+d=sec%10;
+swspi_tx16(0x04<<8 | a);
+swspi_tx16(0x03<<8 | b);
+swspi_tx16(0x02<<8 | c);
+swspi_tx16(0x01<<8 | d);		
+}
+
+void max7219_init(void){
+	swspi_tx16(0x0c<<8 | 0b00000001); 	//shut down
+	swspi_tx16(0x0b<<8 | 0b00000111);		//scan limit
+	swspi_tx16(0x09<<8 | 0b11111111);		//decode mode
+	swspi_tx16(0x0a<<8 | 0b00000011); 	//jas
+}
+
+void tik(void){
+static uint16_t cas=0;
+static uint8_t tik=0;
+	if(milis() - cas >= 300 && tik == 0){
+		TIM2_Cmd(ENABLE);
+		cas=milis();
+		tik=1;
+		TIM2_SetAutoreload(1000);
+	}
+	
+	if(milis() - cas >= 300 && tik == 1){
+		TIM2_Cmd(DISABLE);
+		cas=milis();
+		tik=0;
+	}
+}
+
+
+void init_tim(void){
+GPIO_Init(GPIOD, GPIO_PIN_3, GPIO_MODE_OUT_PP_LOW_SLOW); 
+TIM2_TimeBaseInit(TIM2_PRESCALER_16,1000-1); 
+
+TIM2_OC2Init( 	
+	TIM2_OCMODE_TOGGLE,  		
+	TIM2_OUTPUTSTATE_ENABLE,	
+	1,									
+	TIM2_OCPOLARITY_LOW	
+	);
+TIM2_ARRPreloadConfig(ENABLE);
+TIM2_Cmd(ENABLE);
+}
+
+
+		
+// pod tímto komentářem nic neměňte 
+#ifdef USE_FULL_ASSERT
+
+/**
+  * @brief  Reports the name of the source file and the source line number
+  *   where the assert_param error has occurred.
+  * @param file: pointer to the source file name
+  * @param line: assert_param error line source number
+  * @retval : None
+  */
+void assert_failed(u8* file, u32 line)
+{ 
+  /* User can add his own implementation to report the file name and line number,
+     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+
+  /* Infinite loop */
+  while (1)
+  {
+  }
+}
+#endif
